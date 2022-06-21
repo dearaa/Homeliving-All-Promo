@@ -1,0 +1,360 @@
+SELECT
+	pr.promo_id,
+	pr.promo_name,
+	pr.begin_date,
+	pr.end_date,
+	pr.promo_price,
+	pr.group_type promotype,
+	--pr.promo_type,
+	--pr.subtype,
+	pr.promo_status,
+	pr.creatorname,
+	pr_d.sku_id,
+	skuda.sku_name,
+	jd_prc,
+	COUNT(DISTINCT ord_id) ord_qty,
+	SUM(gmv) sum_gmv,
+	SUM(sku_qty) total_saleqty
+FROM
+	(
+		SELECT
+			pic.id promo_id,
+			prc.promoname promo_name,
+			pic.timebegin,
+			pic.timeend,
+			SUBSTR(pic.timebegin, 0, 10) begin_date,
+			SUBSTR(pic.timeend, 0, 10) end_date,
+			pic.timebegin begin_time,
+			pic.timeend end_time,
+			prc.quota promo_price,
+			prc.min_purchase,
+			prc.max_purchase,
+			pic.created,
+			pic.group_type,
+			promo_type,
+			subtype,
+			pic.promo_status,
+			creatorname
+		FROM
+			(
+				SELECT
+					id,
+					exttags,
+					CASE
+						WHEN exttags LIKE '%2000%'
+							OR exttags LIKE '%2002%'
+							OR exttags LIKE '%2004%'
+							OR exttags LIKE '%2005%'
+						THEN 'single_sku_promo'
+						WHEN exttags NOT LIKE '%TreeSet%'
+							AND subtype IN(4001, 4003, 4009, 4008, 4017)
+						THEN 'full_cut'
+						WHEN exttags NOT LIKE '%TreeSet%'
+							AND subtype = 3001
+						THEN 'bundle'
+						WHEN exttags NOT LIKE '%TreeSet%'
+							AND subtype = 3005
+						THEN 'virtual_bundle'
+						WHEN exttags LIKE '%2001%'
+						THEN 'superdeal'
+						WHEN exttags LIKE '%2003%'
+						THEN 'crazydeal'
+						WHEN exttags LIKE '%2101%'
+							OR exttags LIKE '%2100%'
+						THEN 'free_gift'
+						WHEN exttags NOT LIKE '%TreeSet%'
+							AND subtype IN(4010, 4002)
+						THEN 'pwp'
+						ELSE 'others'
+					END group_type,
+					CASE
+						WHEN exttags LIKE '%2000%'
+						THEN 'normal'
+						WHEN exttags LIKE '%2001%'
+						THEN 'superdeal'
+						WHEN exttags LIKE '%2002%'
+						THEN 'channel'
+						WHEN exttags LIKE '%2003%'
+						THEN 'crazydeal'
+						WHEN exttags LIKE '%2004%'
+						THEN 'member'
+						WHEN exttags LIKE '%2005%'
+						THEN 'area'
+						WHEN exttags LIKE '%2006%'
+						THEN 'bargin'
+						WHEN exttags LIKE '%2007%'
+						THEN 'jd99'
+						WHEN exttags LIKE '%2100%'
+						THEN 'gift_normal'
+						WHEN exttags LIKE '%2101%'
+						THEN 'gift_attach'
+					END promo_type,
+					--subtype,
+					CASE
+						WHEN subtype = 1001
+						THEN 'Ordinary single product'
+						WHEN subtype = 3005
+						THEN 'Virtual set'
+						WHEN subtype = 2003
+						THEN 'Buy more, get more'
+						WHEN subtype = 4002
+						THEN 'Step up purchase'
+						WHEN subtype = 4003
+						THEN 'Full reduction of steps'
+						WHEN subtype = 4008
+						THEN 'Free N pieces for full M pieces'
+						WHEN subtype = 4009
+						THEN 'Discount for full ladders'
+						WHEN subtype = 4010
+						THEN 'Purchase at full price'
+						WHEN subtype = 4017
+						THEN 'Ladder full reduction percentage'
+						WHEN subtype = 3001
+						THEN 'Ordinary suit'
+						WHEN subtype = 2001
+						THEN 'Ordinary gifts (only one main product)'
+						WHEN subtype = 4001
+						THEN 'Ladder full gift'
+					END subtype,
+					--promostate,
+					CASE
+						WHEN promostate = 2
+						THEN 'Promotion suspension'
+						WHEN promostate = 3
+						THEN 'Promotion is being created'
+						WHEN promostate = 4
+						THEN 'Promotion review completed'
+						WHEN promostate = 17
+						THEN 'Refuse'
+						WHEN promostate = 18
+						THEN 'Promotion approval'
+					END promostate,
+					--checkstate,
+					CASE
+						WHEN checkstate = 0
+						THEN 'waiting for review'
+						WHEN checkstate = 1
+						THEN 'reviewed'
+					END checkstate,
+					--deletestate,
+					CASE
+						WHEN deletestate = 0
+						THEN 'not deleted'
+						WHEN deletestate = 1
+						THEN 'deleted'
+					END deletestate,
+					creatorname,
+					timebegin,
+					timeend,
+					created,
+					dt,
+					CASE
+						WHEN dt = '4712-12-31'
+							AND checkstate = 1
+							AND sysdate( - 1) BETWEEN to_date(timebegin) AND to_date(timeend)
+							AND deletestate = 0
+						THEN 'In Progress'
+						WHEN
+							(
+								--dt <> '4712-12-31'
+								--checkstate = 1
+								deletestate = 0
+								AND to_date(timeend) < sysdate( - 1)
+							)
+						THEN 'Expired'
+						WHEN dt = '4712-12-31'
+							AND checkstate = 1
+							AND to_date(timebegin) > sysdate( - 1)
+							AND deletestate = 0
+						THEN 'Not Start'
+						WHEN dt = '4712-12-31'
+							AND promostate = 18
+							AND checkstate = 0
+							AND
+							(
+								to_date(timebegin) >= sysdate( - 1)
+								OR to_date(timeend) >= sysdate( - 1)
+							)
+							AND deletestate = 0
+						THEN 'Pending Approval'
+						WHEN
+							(
+								dt = '4712-12-31'
+								AND deletestate = 1
+							)
+							OR
+							(
+								dt <> '4712-12-31'
+								AND deletestate = 1
+							)
+						THEN 'Terminated'
+					END promo_status,
+					creator
+				FROM
+					fdm.fdm_m_id_promo_1_promotioninfo_chain
+				WHERE
+					dp = 'ACTIVE'
+					AND to_date(created) >= '2022-01-01'
+					--AND SUBSTR(created, 0, 7) = SUBSTR(sysdate( - 1), 0, 7)
+			)
+			pic
+		LEFT JOIN
+			(
+				SELECT
+					start_date,
+					change_code,
+					source_ip,
+					source_db,
+					source_tb,
+					id,
+					promoid,
+					content,
+					created,
+					yn,
+					modified,
+					version,
+					type,
+					dp,
+					dt,
+					end_date,
+					--     regexp_replace(regexp_replace(content, '"\\{', '\\[\\{'),'\\}"','\\}\\]') as content_correction,
+					get_json_object(regexp_replace(regexp_replace(content, '"\\{', '\\[\\{'), '\\}"', '\\}\\]'), '$.name') promoname,
+					get_json_object(regexp_extract(get_json_object(regexp_extract(get_json_object(regexp_replace(regexp_replace(content, '"\\{', '\\[\\{'), '\\}"', '\\}\\]'), "$.rules"), '^\\[(.+)\\]$', 1), '$.actions'), '^\\[(.+)\\]$', 1), '$.fixedPrice') quota,
+					CASE
+						WHEN INSTR(content, 'minNum') = 0
+						THEN ''
+						ELSE SUBSTR(content,(INSTR(content, 'minNum') + 8),(INSTR(SUBSTR(content,(INSTR(content, 'minNum') + 8)), ',')) - 1)
+					END min_purchase,
+					CASE
+						WHEN INSTR(content, 'maxNum') = 0
+						THEN ''
+						ELSE SUBSTR(content,(INSTR(content, 'maxNum') + 8),(INSTR(SUBSTR(content,(INSTR(content, 'maxNum') + 8)), ',')) - 1)
+					END max_purchase
+				FROM
+					fdm.fdm_m_id_promo_1_content_chain
+				WHERE
+					dp = 'ACTIVE'
+			)
+			prc
+		ON
+			pic.id = prc.promoid
+			AND creatorname IN('idagungdanar', 'idniaok', 'idtubagusde', 'idevifirdaus', 'idclarestag', 'idlucia','idboy', 'kelvin.thanaka')
+			AND to_date(pic.created) >= '2022-01-01'
+			--AND sysdate( - 1) BETWEEN to_date(timebegin) AND to_date(timeend)
+	)
+	pr
+LEFT JOIN
+	(
+		SELECT
+			promoid promo_id,
+			skuid sku_id
+		FROM
+			fdm.fdm_m_id_promo_1_rangeproduct_chain
+		WHERE
+			dp = 'ACTIVE'
+	)
+	pr_d
+ON
+	pr.promo_id = pr_d.promo_id
+LEFT JOIN
+	(
+		SELECT
+			item_sku_id,
+			jd_prc,
+			cost_prc
+		FROM
+			gdm.gdm_m03_glb_item_sku_price_da
+		WHERE
+			dt = sysdate( - 1)
+	)
+	prc
+ON
+	pr_d.sku_id = prc.item_sku_id
+LEFT JOIN
+	(
+		SELECT
+			vender_id,
+			item_sku_id,
+			sku_name,
+			item_first_cate_name_en cat1,
+			item_second_cate_name_en cat2,
+			item_third_cate_name_en cat3
+		FROM
+			gdm.gdm_m03_glb_item_sku_da
+		WHERE
+			dt = sysdate( - 1)
+	)
+	skuda
+ON
+	pr_d.sku_id = skuda.item_sku_id
+LEFT JOIN
+	(
+		SELECT DISTINCT
+			ord.ord_id,
+			ord.item_id,
+			ord.book_tm,
+			ord.sku_id,
+			ord.gmv,
+			ord.sku_qty,
+			ord.dt,
+			ord.preprefr_amt,
+			--product_price,
+			promoc.promo_id,
+			ord.pay_tm,
+			ord.ord_compl_tm
+		FROM
+			(
+				SELECT
+					ord_id,
+					item_id,
+					book_tm,
+					sku_id,
+					after_prefr_amt gmv,
+					sale_qtty sku_qty,
+					dt,
+					preprefr_amt,
+					ord_compl_tm,
+					pay_tm
+					--after_prefr_prc AS product_price
+				FROM
+					tmp.tmp_ord_ord_det
+				WHERE
+					YEAR(book_dt) >= '2022'
+					AND ord_state IN(1, 6)
+			)
+			ord
+		JOIN
+			(
+				SELECT
+					order_id,
+					promo_id,
+					sku_ids,
+					REGEXP_REPLACE(value, ',', '') sku_id,
+					discount,
+					discount_rate
+				FROM
+					fdm.fdm_epi_order_order_promo_chain lateral VIEW explode(split(sku_ids, ',')) t AS value
+				WHERE
+					DP = 'ACTIVE'
+			)
+			promoc
+		ON
+			ord.ord_id = promoc.order_id
+			AND ord.sku_id = promoc.sku_id
+	)
+	ord ON pr.promo_id = ord.promo_id
+WHERE
+	pr.creatorname IN('idagungdanar', 'idniaok', 'idtubagusde', 'idevifirdaus', 'idclarestag', 'idlucia', 'idboy', 'kelvin.thanaka')
+	AND to_date(pr.created) >= '2022-01-01'
+GROUP BY
+pr.promo_id,
+	pr.promo_name,
+	pr.begin_date,
+	pr.end_date,
+	pr.promo_price,
+	pr.group_type,
+	pr.promo_status,
+	pr.creatorname,
+	pr_d.sku_id,
+	skuda.sku_name,
+	jd_prc
